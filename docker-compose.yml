@@ -1,7 +1,6 @@
-# Run with DOCKER_BUILD_TARGET=dev to build Rust inside Docker
+# Firezone Production Configuration
+# Упрощенная версия для production-развертывания
 include:
-  - scripts/compose/resources.yml
-  - scripts/compose/edgeshark.yml
   - scripts/compose/portal.yml
 
 x-erlang-cluster: &erlang-cluster
@@ -9,13 +8,13 @@ x-erlang-cluster: &erlang-cluster
   ERLANG_CLUSTER_ADAPTER_CONFIG: '{"hosts":["api@api.cluster.local","web@web.cluster.local","domain@domain.cluster.local"]}'
 
 x-portal-urls: &portal-urls
-  WEB_EXTERNAL_URL: http://localhost:8080/
-  API_EXTERNAL_URL: http://localhost:8081/
+  WEB_EXTERNAL_URL: ${WEB_EXTERNAL_URL:-https://firezone.mark-sandbox.ru/}
+  API_EXTERNAL_URL: ${API_EXTERNAL_URL:-https://wireguard.mark-sandbox.ru/}
 
 x-phoenix-config: &phoenix-config
   PHOENIX_HTTP_WEB_PORT: "8080"
   PHOENIX_HTTP_API_PORT: "8081"
-  PHOENIX_SECURE_COOKIES: "false"
+  PHOENIX_SECURE_COOKIES: "true"
 
 x-health-check: &health-check
   interval: 1s
@@ -34,7 +33,8 @@ services:
     image: ${WEB_IMAGE:-ghcr.io/firezone/web}:${WEB_TAG:-main}
     hostname: web.cluster.local
     ports:
-      - 8080:8080/tcp
+      - "80:8080/tcp"
+      - "443:8080/tcp"
     environment:
       <<: [*portal-urls, *erlang-cluster, *phoenix-config]
       RELEASE_HOSTNAME: "web.cluster.local"
@@ -60,7 +60,7 @@ services:
     image: ${API_IMAGE:-ghcr.io/firezone/api}:${API_TAG:-main}
     hostname: api.cluster.local
     ports:
-      - 8081:8081/tcp
+      - "8081:8081/tcp"
     environment:
       <<: [*portal-urls, *erlang-cluster, *phoenix-config]
       RELEASE_HOSTNAME: "api.cluster.local"
@@ -139,8 +139,7 @@ services:
       postgres:
         condition: "service_healthy"
 
-  # This is a service container which allows to run mix tasks for local development
-  # without having to install Elixir and Erlang on the host machine.
+  # Elixir service для выполнения миграций и управления
   elixir:
     extends:
       file: scripts/compose/portal.yml
@@ -156,26 +155,23 @@ services:
       <<: *portal-urls
       RELEASE_HOSTNAME: "mix.cluster.local"
       RELEASE_NAME: "mix"
-      # Higher log level not to make seeds output too verbose
       LOG_LEVEL: "info"
-      # Mix env should be set to prod to use secrets declared above,
-      # otherwise seeds will generate invalid tokens
       MIX_ENV: "prod"
     depends_on:
       postgres:
         condition: "service_healthy"
 
-  # Run with DOCKER_BUILD_TARGET=dev to build Rust inside Docker
+  # Тестовый клиент для проверки VPN-подключения
   client:
     healthcheck:
       test: ["CMD-SHELL", "ip link | grep tun-firezone"]
       <<: *health-check
     environment:
       FIREZONE_DNS_CONTROL: "${FIREZONE_DNS_CONTROL:-etc-resolv-conf}"
-      FIREZONE_TOKEN: "n.SFMyNTY.g2gDaANtAAAAJGM4OWJjYzhjLTkzOTItNGRhZS1hNDBkLTg4OGFlZjZkMjhlMG0AAAAkN2RhN2QxY2QtMTExYy00NGE3LWI1YWMtNDAyN2I5ZDIzMGU1bQAAACtBaUl5XzZwQmstV0xlUkFQenprQ0ZYTnFJWktXQnMyRGR3XzJ2Z0lRdkZnbgYAR_ywiZQBYgABUYA.PLNlzyqMSgZlbQb1QX5EzZgYNuY9oeOddP0qDkTwtGg"
-      RUST_LOG: ${RUST_LOG:-wire=trace,debug}
+      FIREZONE_TOKEN: "${FIREZONE_CLIENT_TOKEN}"
+      RUST_LOG: ${RUST_LOG:-info}
       FIREZONE_API_URL: ws://api:8081
-      FIREZONE_ID: EFC7A9E3-3576-4633-B633-7D47BA9E14AC
+      FIREZONE_ID: ${FIREZONE_CLIENT_ID}
       FZFF_ICMP_ERROR_UNREACHABLE_PROHIBITED_CREATE_NEW_FLOW: true
     command:
       - sh
@@ -241,10 +237,10 @@ services:
       test: ["CMD-SHELL", "ip link | grep tun-firezone"]
       <<: *health-check
     environment:
-      FIREZONE_TOKEN: ".SFMyNTY.g2gDaANtAAAAJGM4OWJjYzhjLTkzOTItNGRhZS1hNDBkLTg4OGFlZjZkMjhlMG0AAAAkMjI3NDU2MGItZTk3Yi00NWU0LThiMzQtNjc5Yzc2MTdlOThkbQAAADhPMDJMN1VTMkozVklOT01QUjlKNklMODhRSVFQNlVPOEFRVk82VTVJUEwwVkpDMjJKR0gwPT09PW4GAAH8sImUAWIAAVGA.tAm2O9FcyF67VAF3rZdwQpeADrYOIs3S2l2K51G26OM"
-      RUST_LOG: ${RUST_LOG:-wire=trace,debug}
+      FIREZONE_TOKEN: "${FIREZONE_GATEWAY_TOKEN}"
+      RUST_LOG: ${RUST_LOG:-info}
       FIREZONE_API_URL: ws://api:8081
-      FIREZONE_ID: 4694E56C-7643-4A15-9DF3-638E5B05F570
+      FIREZONE_ID: ${FIREZONE_GATEWAY_ID}
     command:
       - sh
       - -c
@@ -360,115 +356,7 @@ services:
         ipv6_address: 203:0:113::101
         interface_name: internet
 
-  relay-2:
-    extends:
-      file: scripts/compose/relay.yml
-      service: relay
-    environment:
-      PUBLIC_IP4_ADDR: 203.0.113.102
-      PUBLIC_IP6_ADDR: 203:0:113::102
-    command:
-      - sh
-      - -c
-      - |
-        set -e
 
-        # Add static route to internet subnet via router
-        ip -4 route add 203.0.113.0/24 via 172.29.2.254
-        ip -6 route add 203:0:113::/64 via 172:29:2::254
-
-        apk add --no-cache ethtool
-        ethtool -K eth0 tx off
-
-        firezone-relay
-    depends_on:
-      relay-2-router:
-        condition: "service_healthy"
-    networks:
-      relay-2-internal:
-        ipv4_address: 172.29.2.100
-        ipv6_address: 172:29:2::100
-
-  relay-2-router:
-    extends:
-      file: scripts/compose/router.yml
-      service: router
-    environment:
-      PORT_FORWARDS: |
-        3478 172.29.2.100 udp
-        49152-65535 172.29.2.100 udp
-        3478 172:29:2::100 udp
-        49152-65535 172:29:2::100 udp
-      NETWORK_LATENCY_MS: 30
-    networks:
-      relay-2-internal:
-        ipv4_address: 172.29.2.254
-        ipv6_address: 172:29:2::254
-        interface_name: internal
-      internet:
-        ipv4_address: 203.0.113.102
-        ipv6_address: 203:0:113::102
-        interface_name: internet
-
-  # The veth driver uses a pair of interfaces to connect the docker bridge to the container namespace.
-  # For containers that have an eBPF program attached and do XDP_TX, we need to attach a dummy program
-  # to the corresponding veth interface on the host to be able to receive the XDP_TX traffic and pass
-  # it up to the docker bridge successfully.
-  #
-  # The "recommended" way to do this is to set both veth interfaces' GRO to on, or attach an XDP program
-  # that does XDP_PASS to the host side veth interface. The GRO method is not reliable and was shown to
-  # only pass packets in large bursts every 15-20 seconds which breaks ICE setup, so we use the XDP method.
-  #
-  # For correct behaviour, we also disable any kind of offloading for all veth and bridge devices.
-  # This forces the kernel to calculate all checksums in software.
-  network-config:
-    image: ghcr.io/firezone/xdp-pass
-    pid: host
-    network_mode: host
-    privileged: true
-    restart: on-failure
-    command:
-      - sh
-      - -c
-      - |
-        set -e
-
-        VETHS=$$(ip -json link show type veth | jq -r '.[].ifname')
-
-        for dev in $$VETHS; do
-          echo "Attaching XDP to: $$dev"
-          ip link set dev $$dev xdpdrv off # Clear any existing XDP program.
-          ip link set dev $$dev xdpdrv obj /xdp/xdp_pass.o sec xdp
-
-          ethtool -K $$dev tx off # Disable offloading.
-        done
-
-        echo "Done configuring $$(echo "$$VETHS" | wc -w) veth interfaces"
-
-        BRIDGES=$$(ip -json link show type bridge | jq -r '.[].ifname')
-
-        for dev in $$BRIDGES; do
-          ethtool -K $$dev tx off # Disable offloading.
-        done
-
-        echo "Done configuring $$(echo "$$BRIDGES" | wc -w) bridge interfaces"
-    depends_on:
-      relay-1:
-        condition: "service_healthy"
-      relay-2:
-        condition: "service_healthy"
-      relay-1-router:
-        condition: "service_healthy"
-      relay-2-router:
-        condition: "service_healthy"
-      gateway-router:
-        condition: "service_healthy"
-      client-router:
-        condition: "service_healthy"
-      gateway:
-        condition: "service_healthy"
-      client:
-        condition: "service_healthy"
 
   otel:
     image: otel/opentelemetry-collector:latest
@@ -498,12 +386,6 @@ networks:
         - subnet: 172.29.1.0/24
         - subnet: 172:29:1::/64
 
-  relay-2-internal:
-    enable_ipv6: true
-    ipam:
-      config:
-        - subnet: 172.29.2.0/24
-        - subnet: 172:29:2::/64
 
   client-internal:
     enable_ipv6: true

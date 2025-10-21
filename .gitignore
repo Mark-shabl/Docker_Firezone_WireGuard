@@ -1,34 +1,22 @@
-# macOS cruft
-.DS_Store
-
-# Ignore .fetch files in case you like to edit your project deps locally.
-/.fetch
-
-# Also ignore archive artifacts (built via "mix archive.build").
-*.ez
-
-# If NPM crashes, it generates a log, let's ignore it too.
-npm-debug.log
-
-*.log
-*.sw?
-
-# Development environment configuration
+# Секреты и конфигурация
 .env
-.oidc_env.json
 
-# Built packages
-/*.deb
-/*.rpm
+# Данные базы данных
+postgres-data/
+vault-data/
+firezone-data/
 
-# Ignore generated credentials from google-github-actions/auth
-gha-creds-*.json
+# Логи
+logs/
+*.log
 
-# Ignore local `direnv` cache
-.direnv
+# Резервные копии
+backup_*
+*.bak
+*.backup
 
-# Ignore personal spelling dictionary
-/cspell.json
-
-# Ignore build data for sourcekit-lsp (Swift code)
-buildServer.json
+# Системные файлы
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
