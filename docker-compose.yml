@@ -400,3 +400,15 @@ networks:
       config:
         - subnet: 172.31.0.0/24
         - subnet: 172:31:0::/64
+
+  resources:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+        - subnet: 172:20:0::/64
+
+  dns_resources:
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
